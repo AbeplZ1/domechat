@@ -1,0 +1,13 @@
+{
+  "name": "domechat-trending",
+  "version": "1.6.0",
+  "description": "DomeChat with dynamic trending topics based on live usage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
