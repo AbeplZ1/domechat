@@ -1,0 +1,13 @@
+{
+  "name": "domechat-modern",
+  "version": "1.2.0",
+  "description": "DomeChat (modern) \u2014 navy/white theme, WebRTC signaling, E2EE text, overlay textbox",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
