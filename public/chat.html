@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DomeChat Chat</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <div id="topbar">
+    <div class="follow-badge">follow domechat.live on TikTok</div>
+    <div>
+      <button id="ringLightToggle">Ring Light Off</button>
+    </div>
+  </div>
+
+  <div id="videoPlaceholder">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+  <div id="ringLightOverlay"></div>
+
+  <div id="chatArea">
+    <div id="chatMessages" aria-live="polite"></div>
+    <div id="typingIndicator"></div>
+    <div id="controlsRow">
+      <input id="messageInput" placeholder="Type your message..." autocomplete="off"/>
+      <button id="sendBtn" disabled>Send</button>
+    </div>
+    <div id="bottomControls">
+      <button id="saveChatBtn">Save Chat</button>
+      <button id="nextBtn">Find Next</button>
+      <button id="disconnectBtn">Disconnect</button>
+    </div>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// Helpers
+const toB64=(buf)=>btoa(String.fromCharCode(...new Uint8Array(buf)));
+const fromB64=(b64)=>{const bin=atob(b64);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr.buffer;};
+
+// E2EE
+let cryptoKey=null, keyPair=null, hasPartner=false;
+async function genECDH(){ keyPair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']); const raw=await crypto.subtle.exportKey('raw',keyPair.publicKey); return toB64(raw); }
+async function importPeer(pubB64){ const raw=fromB64(pubB64); const peer=await crypto.subtle.importKey('raw',raw,{name:'ECDH',namedCurve:'P-256'},true,[]); cryptoKey=await crypto.subtle.deriveKey({name:'ECDH',public:peer},keyPair.privateKey,{name:'AES-GCM',length:256},false,['encrypt','decrypt']); }
+async function encryptText(t){ const iv=crypto.getRandomValues(new Uint8Array(12)); const enc=new TextEncoder().encode(t); const c=await crypto.subtle.encrypt({name:'AES-GCM',iv},cryptoKey,enc); return {iv:toB64(iv.buffer),data:toB64(c)}; }
+async function decryptText(p){ const iv=fromB64(p.iv); const data=fromB64(p.data); const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:iv.slice(0)},cryptoKey,data); return new TextDecoder().decode(pt); }
+
+// UI
+const chat = document.getElementById('chatMessages');
+function addMessage(text,self=false){ const d=document.createElement('div'); d.textContent=text; if(self) d.classList.add('self'); const t=document.createElement('span'); t.className='timestamp'; t.textContent=new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); d.appendChild(t); chat.appendChild(d); chat.scrollTop=chat.scrollHeight; }
+
+const socket = io();
+const params = new URLSearchParams(location.search);
+const topic = params.get('topic') || '';
+
+// ICE with STUN; TURN can be added later
+const ICE = { iceServers: [ { urls: ['stun:stun.l.google.com:19302','stun:global.stun.twilio.com:3478'] } ] };
+
+let pc=null, localStream=null;
+const localVideo=document.getElementById('localVideo');
+const remoteVideo=document.getElementById('remoteVideo');
+
+async function tryGetMedia(){
+  // Try several constraint sets to improve compatibility
+  const variants = [
+    { video:{ facingMode:'user', width:{ideal:1280}, height:{ideal:720} }, audio:true },
+    { video:true, audio:true },
+    { video:{ facingMode:'user' }, audio:true }
+  ];
+  for (const constraints of variants){
+    try{
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      return s;
+    }catch(e){ console.warn('gUM failed for variant', constraints, e); }
+  }
+  throw new Error('Unable to access camera/mic');
+}
+
+async function startMedia(){
+  if (localStream) return;
+  try{
+    localStream = await tryGetMedia();
+    localVideo.srcObject = localStream;
+  }catch(e){
+    addMessage('Camera/mic blocked or unavailable. Click the lock icon in your browser and allow access.');
+    console.error('getUserMedia error', e);
+  }
+}
+
+async function createPC(){
+  pc = new RTCPeerConnection(ICE);
+  // ensure we can receive even if no local tracks (edge cases)
+  pc.addTransceiver('video', {direction:'recvonly'});
+  pc.addTransceiver('audio', {direction:'recvonly'});
+
+  if(localStream) localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+  pc.ontrack = e => { if(e.streams && e.streams[0]) remoteVideo.srcObject = e.streams[0]; };
+  pc.onicecandidate = ev => { if(ev.candidate && hasPartner) socket.emit('signal', {type:'ice', candidate:ev.candidate}); };
+}
+
+socket.emit('setTopic', topic);
+
+socket.on('waiting', m => addMessage(m));
+
+socket.on('partnerFound', async ()=>{
+  hasPartner = true;
+  chat.textContent='';
+  addMessage('You found a new partner!');
+  await startMedia();
+  await createPC();
+  const pub = await genECDH(); socket.emit('ecdh-public', pub);
+  const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:true });
+  await pc.setLocalDescription(offer);
+  socket.emit('signal', {type:'sdp', description: offer});
+});
+
+socket.on('partnerDisconnected', ()=>{ hasPartner=false; addMessage('Partner disconnected.'); });
+socket.on('forceDisconnect', ()=>{ hasPartner=false; addMessage('Partner disconnected.'); });
+
+socket.on('signal', async (data)=>{
+  if(!pc) await createPC();
+  if(!hasPartner) return;
+  if(data.type==='sdp'){
+    const d=data.description;
+    if(d.type==='offer'){
+      await pc.setRemoteDescription(d);
+      await startMedia(); // ensure we have tracks before answering
+      localStream?.getTracks().forEach(t=>pc.addTrack(t, localStream));
+      const ans=await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+      socket.emit('signal',{type:'sdp', description: ans});
+    } else if(d.type==='answer'){
+      await pc.setRemoteDescription(d);
+    }
+  } else if(data.type==='ice'){
+    try{ await pc.addIceCandidate(data.candidate); }catch(e){ console.warn('ICE add error', e); }
+  }
+});
+
+socket.on('ecdh-public', async (peer)=>{
+  if(!hasPartner) return;
+  try{
+    await importPeer(peer);
+    document.getElementById('sendBtn').disabled=false;
+    document.getElementById('messageInput').disabled=false;
+  }catch(e){ console.error('ECDH', e); }
+});
+
+socket.on('enc-message', async payload => {
+  if(!hasPartner) return;
+  try{ const txt = await decryptText(payload); addMessage(txt,false); } catch(e){}
+});
+
+// typing only with partner
+const typing = document.getElementById('typingIndicator');
+socket.on('partnerTyping', ()=>{ if(!hasPartner) return; typing.textContent='Partner is typing...'; setTimeout(()=>typing.textContent='',1200); });
+
+// send
+const sendBtn=document.getElementById('sendBtn');
+const msgIn=document.getElementById('messageInput');
+sendBtn.onclick = async ()=>{
+  const txt = msgIn.value.trim();
+  if(!txt || !hasPartner || !cryptoKey) return;
+  addMessage(txt,true);
+  socket.emit('enc-message', await encryptText(txt));
+  msgIn.value='';
+};
+msgIn.addEventListener('keypress', e=>{ if(e.key==='Enter') sendBtn.click(); else if(hasPartner) socket.emit('typing'); });
+
+// Snapchat-like ring toggle
+const ringBtn=document.getElementById('ringLightToggle');
+const ringOverlay=document.getElementById('ringLightOverlay');
+ringBtn.onclick=()=>{
+  const on = ringOverlay.classList.toggle('active');
+  ringBtn.textContent = on ? 'Ring Light On' : 'Ring Light Off';
+};
+
+// next & disconnect
+document.getElementById('nextBtn').onclick=()=>{ if (hasPartner) socket.emit('next'); else socket.emit('setTopic', topic); };
+document.getElementById('disconnectBtn').onclick=()=>{ if (hasPartner) socket.emit('disconnectPartner'); hasPartner=false; location.href='/'; };
+
+// Save chat
+document.getElementById('saveChatBtn').onclick=()=>{
+  let t=''; document.querySelectorAll('#chatMessages div').forEach(d=> t+=d.textContent+'\n');
+  const blob = new Blob([t], {type:'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'domechat_transcript.txt'; a.click();
+};
+</script>
+</body>
+</html>

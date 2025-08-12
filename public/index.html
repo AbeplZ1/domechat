@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DomeChat</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <script> if(!localStorage.getItem('domechatTermsAccepted')) location.href='terms.html'; </script>
+  <main class="center">
+    <h1 class="logo">DOMECHAT</h1>
+    <div id="permNote" style="opacity:.85;font-size:12px;"></div>
+    <input id="topic" type="text" placeholder="Enter your topic (optional)" maxlength="60"/>
+    <div><button id="startBtn">Connect to Video Chat</button></div>
+  </main>
+<script>
+  // Ask for camera/mic upfront to reduce permission issues later
+  (async function prePermission(){
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}, audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+      localStorage.setItem('domechatMediaGranted','1');
+      document.getElementById('permNote').textContent = 'Camera & mic access granted ✓';
+    } catch {
+      document.getElementById('permNote').textContent = 'Please allow camera & mic when prompted on the chat screen.';
+    }
+  })();
+
+  const go=()=>{
+    const t=document.getElementById('topic').value.trim();
+    location.href='/chat.html'+(t?('?topic='+encodeURIComponent(t)):'')
+  };
+  document.getElementById('startBtn').onclick=go;
+  document.getElementById('topic').addEventListener('keypress',e=>{ if(e.key==='Enter') go(); });
+</script>
+</body>
+</html>

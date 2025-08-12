@@ -1,0 +1,13 @@
+{
+  "name": "domechat-webrtc-fix",
+  "version": "1.7.0",
+  "description": "DomeChat with improved WebRTC camera handling and Snapchat-style ring overlay",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
