@@ -1,0 +1,13 @@
+{
+  "name": "domechat-noring-nosave",
+  "version": "1.9.0",
+  "description": "DomeChat without ring light or save chat; robust WebRTC; trending topics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
