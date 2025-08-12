@@ -1,0 +1,13 @@
+{
+  "name": "domechat-trending-ring",
+  "version": "1.8.0",
+  "description": "DomeChat with always-on local preview, robust WebRTC, trending topics (TikTok \ud83d\udd25), and Snapchat-like ring",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
