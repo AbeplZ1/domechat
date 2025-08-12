@@ -1,0 +1,13 @@
+{
+  "name": "domechat-next",
+  "version": "1.4.0",
+  "description": "DomeChat with improved Next pairing and ads/premium scaffolding",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
