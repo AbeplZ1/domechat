@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Terms & Agreement - DomeChat</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <main class="center">
+    <div style="max-width:640px;text-align:left;background:linear-gradient(180deg,#0f254d,#0b1b3b);padding:20px;border-radius:16px;border:1px solid rgba(255,255,255,.15)">
+      <h2>Terms & Agreement</h2>
+      <p>By using DomeChat you agree to:</p>
+      <ul>
+        <li>Follow applicable laws; no illegal activity.</li>
+        <li>No harassment, threats, or hate speech.</li>
+        <li>No nudity/sexual content. Offenders may be banned.</li>
+        <li>No sharing of sensitive personal data.</li>
+      </ul>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+        <button id="decline" style="background:#1c3d7b;color:#e6eeff">Decline</button>
+        <button id="agree">I Agree</button>
+      </div>
+    </div>
+  </main>
+<script>
+  agree.onclick=()=>{ localStorage.setItem('domechatTermsAccepted','true'); location.href='index.html'; };
+  decline.onclick=()=>{ alert('You must accept to use DomeChat.'); location.href='https://google.com'; };
+</script>
+</body>
+</html>

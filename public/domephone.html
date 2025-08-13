@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Dome Phone</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <style>#roomCode{font-weight:700;letter-spacing:2px}</style>
+</head>
+<body>
+<div class="dp-wrap">
+  <h1 class="logo">DOME PHONE</h1>
+
+  <div id="stageCreateJoin">
+    <div class="dp-row">
+      <input id="nickname" placeholder="Nickname" maxlength="16"/>
+      <button id="createBtn">Create Room</button>
+      <input id="joinCode" placeholder="Enter room code" maxlength="6" style="text-transform:uppercase"/>
+      <button id="joinBtn">Join</button>
+    </div>
+    <div style="margin-top:6px;opacity:.85">Recommended: <b>6–12 players</b>. You can toggle camera in the lobby.</div>
+  </div>
+
+  <div id="stageLobby" style="display:none">
+    <div class="dp-row" style="justify-content:space-between">
+      <div>Room: <span id="roomCode"></span></div>
+      <div>
+        <button id="toggleCamBtn">Camera: Off</button>
+        <button id="leaveBtn">Leave</button>
+      </div>
+    </div>
+
+    <div id="players"></div>
+    <div id="videoGrid"></div>
+    <div style="margin-top:12px;opacity:.8" id="capNote">Up to 4 cameras can be on at once (for performance).</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const codeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const makeCode = (n=6)=> Array.from({length:n},()=> codeChars[Math.floor(Math.random() * codeChars.length)]).join('');
+  const getNickLS = () => (localStorage.getItem('dome_nick') || '').trim();
+  const setNickLS = (n) => localStorage.setItem('dome_nick', n);
+
+  const socket = io('/domephone', { path: '/socket.io' });
+
+  const stageCreateJoin = document.getElementById('stageCreateJoin');
+  const stageLobby = document.getElementById('stageLobby');
+  const roomSpan = document.getElementById('roomCode');
+  const playersDiv = document.getElementById('players');
+  const videoGrid = document.getElementById('videoGrid');
+  const toggleCamBtn = document.getElementById('toggleCamBtn');
+
+  let roomCode = null, nickname = null;
+
+  function needNick(){
+    nickname = document.getElementById('nickname').value.trim() || getNickLS();
+    if (!nickname) {
+      const n = prompt('Choose a nickname (3–16 chars):') || '';
+      nickname = n.trim().slice(0,16);
+      if (!nickname || nickname.length < 3) { alert('Nickname required.'); return true; }
+      setNickLS(nickname);
+      document.getElementById('nickname').value = nickname;
+    } else {
+      setNickLS(nickname);
+    }
+    return false;
+  }
+
+  document.getElementById('createBtn').onclick = () => {
+    if (needNick()) return;
+    roomCode = makeCode(6);
+    joinRoom(roomCode, nickname, true);
+  };
+  document.getElementById('joinBtn').onclick = () => {
+    if (needNick()) return;
+    roomCode = (document.getElementById('joinCode').value || '').toUpperCase().slice(0,6);
+    if (!roomCode) return alert('Enter room code');
+    joinRoom(roomCode, nickname, false);
+  };
+  document.getElementById('nickname').value = getNickLS();
+
+  function joinRoom(code, nick, created){
+    socket.emit('joinLobby', code, nick, created);
+  }
+
+  socket.on('joined', ({code, players, created, nick})=>{
+    nickname = nick || nickname; setNickLS(nickname);
+    roomCode = code;
+    roomSpan.textContent = code;
+    stageCreateJoin.style.display='none';
+    stageLobby.style.display='block';
+    renderPlayers(players);
+  });
+
+  socket.on('players', (players)=> renderPlayers(players));
+
+  function renderPlayers(players){
+    playersDiv.textContent = 'Players: ' + players.map(p => p.nick + (p.camOn?' 🎥':'' )).join(', ');
+    for (const p of players){
+      let holder = document.getElementById('tile_'+p.id);
+      if (!holder){
+        holder = document.createElement('div');
+        holder.id = 'tile_'+p.id;
+        holder.style.position='relative';
+        holder.style.display='inline-block';
+        holder.style.width='160px';
+        holder.style.margin='4px';
+        videoGrid.appendChild(holder);
+        const v=document.createElement('video'); v.id='v_'+p.id; v.autoplay=true; v.playsInline=true; holder.appendChild(v);
+        const label=document.createElement('div'); label.className='nameLabel'; label.textContent=p.nick; holder.appendChild(label);
+      } else {
+        const label=holder.querySelector('.nameLabel'); if(label) label.textContent=p.nick;
+      }
+    }
+  }
+
+  // Simple mesh signaling (you will still need user media + RTCPeerConnection in a real session)
+  const ICE = { iceServers:[ {urls:['stun:stun.l.google.com:19302','stun:global.stun.twilio.com:3478']} ] };
+  let localStream=null;
+  const peers = new Map();
+
+  let camOn = false;
+  toggleCamBtn.onclick = async ()=>{
+    if (!camOn) {
+      const slots = (Array.from(peers.values()).filter(p=>p.isSelf).length) +
+                    (Array.from(peers.values()).filter(p=>!p.isSelf && p.videoEl && !p.videoEl.paused).length);
+      if (slots >= 4) return alert('Camera cap reached (4).');
+      try{
+        localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+      }catch(e){ return alert('Allow camera to turn it on.'); }
+      camOn = true; toggleCamBtn.textContent = 'Camera: On';
+      addSelfVideo(localStream);
+      socket.emit('camState', { on:true });
+      startPeerConns();
+    } else {
+      camOn = false; toggleCamBtn.textContent = 'Camera: Off';
+      stopSelfStream();
+      socket.emit('camState', { on:false });
+      for (const {pc} of peers.values()){
+        pc.getSenders().forEach(s=> { if (s.track && s.track.kind==='video') pc.removeTrack(s); });
+      }
+    }
+  };
+
+  function addSelfVideo(stream){
+    let holder = document.getElementById('tile_self');
+    if (!holder){
+      holder = document.createElement('div');
+      holder.id = 'tile_self'; holder.style.position='relative'; holder.style.display='inline-block';
+      holder.style.width='160px'; holder.style.margin='4px';
+      videoGrid.prepend(holder);
+      const v=document.createElement('video'); v.id='selfVideo'; v.autoplay=true; v.muted=true; v.playsInline=true; holder.appendChild(v);
+      const label=document.createElement('div'); label.className='nameLabel'; label.textContent=nickname||'You'; holder.appendChild(label);
+      peers.set('self', {isSelf:true, pc:null, videoEl:v});
+    }
+    holder.querySelector('video').srcObject = stream;
+  }
+  function stopSelfStream(){
+    const self = peers.get('self');
+    if (self && self.videoEl) { self.videoEl.srcObject=null; self.videoEl.parentElement.remove(); }
+    peers.delete('self');
+    localStream?.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+
+  function ensurePeer(peerId){
+    if (peers.has(peerId)) return peers.get(peerId);
+    const pc = new RTCPeerConnection(ICE);
+    if (localStream) localStream.getTracks().forEach(t=> pc.addTrack(t, localStream));
+    pc.ontrack = e => {
+      const v = document.getElementById('v_'+peerId);
+      if (v) { v.srcObject = e.streams[0]; v.play().catch(()=>{}); }
+    };
+    pc.onicecandidate = ({candidate})=>{ if(candidate) socket.emit('dp-signal', {to:peerId, type:'ice', candidate}); };
+    peers.set(peerId, {pc, videoEl:document.getElementById('v_'+peerId)});
+    return peers.get(peerId);
+  }
+  function startPeerConns(){ socket.emit('dp-peers'); }
+
+  socket.on('dp-peers', async (ids)=>{
+    for (const id of ids){
+      if (id === socket.id) continue;
+      const {pc} = ensurePeer(id);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('dp-signal', {to:id, type:'sdp', description: pc.localDescription});
+    }
+  });
+  socket.on('dp-signal', async ({from, type, description, candidate})=>{
+    const {pc} = ensurePeer(from);
+    if (type==='sdp'){
+      await pc.setRemoteDescription(description);
+      if (description.type==='offer'){
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        socket.emit('dp-signal', {to:from, type:'sdp', description: pc.localDescription});
+      }
+    } else if (type==='ice'){
+      try{ await pc.addIceCandidate(candidate); }catch{}
+    }
+  });
+  socket.on('leftPeer', (id)=>{
+    const p = peers.get(id);
+    if (p && p.videoEl){ p.videoEl.srcObject=null; }
+    const tile = document.getElementById('tile_'+id); tile && tile.remove();
+    peers.delete(id);
+  });
+</script>
+</body>
+</html>
