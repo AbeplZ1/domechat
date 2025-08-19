@@ -1,0 +1,147 @@
+
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DomeChat Chat</title><link rel="stylesheet" href="styles.css"/></head><body>
+<div id="topbar"><div class="brand"><div class="dot"></div><div class="logo">DOMECHAT</div></div></div>
+<div class="page">
+  <div class="controls" style="margin-bottom:10px">
+    <button id="muteBtn" class="ghost square" title="Toggle microphone">Mic: On</button>
+    <button id="camBtn" class="ghost square" title="Toggle camera">Cam: On</button>
+    <button id="nextBtn" class="square">Find Next</button>
+    <button id="reportBtn" class="ghost square" title="Report (nudity)">Report</button>
+    <button id="blockBtn" class="ghost square" title="Block">Block</button>
+    <button id="disconnectBtn" class="ghost square">Exit</button>
+  </div>
+  <div class="grid">
+    <div class="surface" id="videoStage">
+      <div id="searchOverlay" class="searching" style="display:none"><div style="text-align:center">
+        <div class="dotpulse" style="margin:0 auto 8px"></div><div>Searching for a partner…</div></div></div>
+      <div id="camOverlay" class="center" style="display:flex">
+        <div class="cam-card">
+          <b>Enable your camera & microphone</b>
+          <p style="margin:8px 0 12px;color:#aab3c0">Click below and allow permissions in your browser.</p>
+          <button id="enableCamBtn">Enable camera & mic</button>
+          <div style="margin-top:8px;font-size:12px;color:#aab3c0">If no prompt appears, click the lock icon in the address bar and allow Camera & Microphone.</div>
+          <div id="diag" style="margin-top:10px;font-size:12px;color:#aab3c0;white-space:pre-wrap"></div>
+        </div>
+      </div>
+      <div id="unmuteOverlay">Tap to unmute</div>
+      <div class="mic-meter" id="micMeter">mic: --</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="localVideo" autoplay muted playsinline></video>
+      <div class="reaction-bar" id="reactionBar">
+        <button class="reaction-btn" data-r="😂">😂</button>
+        <button class="reaction-btn" data-r="👍">👍</button>
+        <button class="reaction-btn" data-r="❤️">❤️</button>
+        <button class="reaction-btn" data-r="😮">😮</button>
+        <button class="reaction-btn" data-r="👎">👎</button>
+        <button class="reaction-btn" data-r="🚩">🚩</button>
+      </div>
+    </div>
+    <div id="chatPanel" class="surface" style="padding:12px">
+      <div id="chatMessages" aria-live="polite"></div>
+      <div id="typingIndicator"></div>
+      <div id="controlsRow">
+        <input id="messageInput" placeholder="Type your message…" autocomplete="off"/>
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="follow-badge">follow domechat.live on TikTok</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/media-permissions.js"></script>
+<script>
+// Basic chat append
+const chat=document.getElementById('chatMessages');function addMessage(text,self=false){const d=document.createElement('div');d.className='msg '+(self?'self':'other');d.textContent=text;const t=document.createElement('span');t.className='timestamp';t.textContent=new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});d.appendChild(t);chat.appendChild(d);chat.scrollTop=chat.scrollHeight}
+const setSearching=(on)=>document.getElementById('searchOverlay').style.display=on?'flex':'none';
+
+let localStream=null; let pc=null; const msgIn=document.getElementById('messageInput'); const sendBtn=document.getElementById('sendBtn');
+const remoteVideo=document.getElementById('remoteVideo'); const localVideo=document.getElementById('localVideo'); const unmuteOverlay=document.getElementById('unmuteOverlay');
+remoteVideo.muted=true; unmuteOverlay.style.display='block'; unmuteOverlay.onclick=()=>{remoteVideo.muted=false;unmuteOverlay.style.display='none'};
+
+// Microphone meter (so you can see audio activity instantly)
+let audioCtx, analyser, micMeter=document.getElementById('micMeter');
+function startMeter(stream){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();const source=audioCtx.createMediaStreamSource(stream);analyser=audioCtx.createAnalyser();analyser.fftSize=256;source.connect(analyser);
+const data=new Uint8Array(analyser.frequencyBinCount);(function loop(){analyser.getByteTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++){const v=(data[i]-128)/128;sum+=v*v}const rms=Math.sqrt(sum/data.length);micMeter.textContent='mic: '+(rms>0.02?'live':'quiet');requestAnimationFrame(loop)})()}catch{}}
+
+// Permissions overlay wiring (camera + mic)
+MediaPerms.ensureLocal({
+  video:true, audio:true,
+  overlayIds:{overlay:'camOverlay', enableBtn:'enableCamBtn', diag:'diag'},
+  localVideoId:'localVideo',
+  wantProcessing:true,
+  onStream: (s)=>{ localStream = s; startMeter(s); }
+});
+
+// Socket & WebRTC
+let makingOffer=false,ignoreOffer=false,isPolite=false,hasPartner=false,currentPartnerId=null;const pendingCandidates=[];function drainPending(){if(!pc||!pc.remoteDescription)return;while(pendingCandidates.length){pc.addIceCandidate(pendingCandidates.shift()).catch(()=>{})}}
+let ICE={iceServers:[{urls:['stun:stun.l.google.com:19302']}]};(async()=>{try{const r=await fetch('/ice',{cache:'no-store'});const list=await r.json();if(Array.isArray(list)&&list.length)ICE={iceServers:list}}catch{}})();
+
+const params=new URLSearchParams(location.search);const topic=(params.get('topic')||'').trim();const forceRelay=params.get('relay')==='1';
+const SID_KEY='dome_sid';let sessionId=localStorage.getItem(SID_KEY);if(!sessionId){sessionId=(crypto.randomUUID?.()||(Date.now().toString(36)+Math.random().toString(36).slice(2,8)));localStorage.setItem(SID_KEY,sessionId)}
+
+const socket=io();socket.emit('session',sessionId);socket.emit('setTopic',topic);
+socket.on('roles',({polite,peerId})=>{isPolite=!!polite;currentPartnerId=peerId});
+socket.on('waiting',msg=>{addMessage(msg);setSearching(true)});
+socket.on('partnerFound',async()=>{
+  setSearching(false); hasPartner=true; chat.textContent=''; addMessage('You found a new partner!');
+  if(!localStream){ addMessage('Click "Enable camera & mic" to start.', true); return; }
+  if(!pc){ pc=new RTCPeerConnection({...ICE,...(forceRelay?{iceTransportPolicy:'relay'}:{})});
+    // Add tracks (BOTH video + audio)
+    localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+    pc.ontrack=e=>{ if(e.streams&&e.streams[0]){ remoteVideo.srcObject=e.streams[0]; remoteVideo.play().catch(()=>{});} };
+    pc.onicecandidate=({candidate})=>{ if(candidate) socket.emit('signal',{type:'ice',candidate}) };
+    pc.onconnectionstatechange=()=>{ if(pc.connectionState==='failed'){ try{pc.restartIce()}catch{} } };
+    pc.onnegotiationneeded=async()=>{ try{ makingOffer=true; await pc.setLocalDescription(await pc.createOffer()); socket.emit('signal',{type:'sdp',description:pc.localDescription}); }finally{ makingOffer=false; } };
+  }
+  // Enable text immediately
+  sendBtn.disabled=false; msgIn.disabled=false;
+});
+
+socket.on('signal',async({type,description,candidate})=>{
+  if(!pc) return;
+  if(type==='sdp'){
+    const collision=(description.type==='offer')&&(makingOffer||pc.signalingState!=='stable');
+    ignoreOffer=!isPolite&&collision; if(ignoreOffer)return;
+    await pc.setRemoteDescription(description);
+    if(description.type==='offer'){ await pc.setLocalDescription(await pc.createAnswer()); socket.emit('signal',{type:'sdp',description:pc.localDescription}); }
+    drainPending();
+  }else if(type==='ice'){
+    if(!pc.remoteDescription) pendingCandidates.push(candidate);
+    else{ try{ await pc.addIceCandidate(candidate); }catch{} }
+  }
+});
+socket.on('partnerDisconnected',()=>{ hasPartner=false; addMessage('Partner disconnected. Searching…'); setSearching(true); sendBtn.disabled=true; msgIn.disabled=true; setTimeout(()=>{ if(!hasPartner) socket.emit('next'); }, 1800); });
+
+// Plaintext chat fallback + E2EE upgrade
+const toB64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));const fromB64=b=>{const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u.buffer}
+let cryptoKey=null,keyPair=null;async function genECDH(){keyPair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);const raw=await crypto.subtle.exportKey('raw',keyPair.publicKey);return toB64(raw)}async function importPeer(pub){const raw=fromB64(pub);const peer=await crypto.subtle.importKey('raw',raw,{name:'ECDH',namedCurve:'P-256'},true,[]);cryptoKey=await crypto.subtle.deriveKey({name:'ECDH',public:peer},keyPair.privateKey,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}
+async function encryptText(t){const iv=crypto.getRandomValues(new Uint8Array(12));const c=await crypto.subtle.encrypt({name:'AES-GCM',iv},cryptoKey,new TextEncoder().encode(t));return{iv:toB64(iv.buffer),data:toB64(c)}}async function decryptText(p){const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(p.iv).slice(0)},cryptoKey,fromB64(p.data));return new TextDecoder().decode(pt)}
+socket.on('ecdh-public',async(peer)=>{try{await importPeer(peer);}catch{}});
+const sendBtnEl=document.getElementById('sendBtn');const msgInEl=document.getElementById('messageInput');
+sendBtnEl.onclick=async()=>{const txt=msgInEl.value.trim(); if(!txt||!hasPartner)return; try{ if(cryptoKey){const payload=await encryptText(txt); socket.emit('enc-message',{payload,from:socket.id});} else { socket.emit('message',{text:txt}); } addMessage(txt,true); msgInEl.value=''; }catch(_){ socket.emit('message',{text:txt}); addMessage(txt,true); msgInEl.value=''; }};
+msgInEl.addEventListener('keypress',e=>{if(e.key==='Enter')sendBtnEl.click();else if(hasPartner)socket.emit('typing',{from:socket.id})});
+socket.on('enc-message',({payload,from})=>{ if(from===socket.id) return; decryptText(payload).then(text=>addMessage(text,false)).catch(()=>{}); });
+socket.on('message',({text,from})=>{ if(from===socket.id) return; if(typeof text==='string' && text) addMessage(text,false); });
+socket.on('typing',({from})=>{ if(from!==currentPartnerId) return; const ti=document.getElementById('typingIndicator'); ti.textContent='Partner is typing...'; setTimeout(()=>ti.textContent='',1200); });
+
+// Mute / Cam toggle
+const muteBtn=document.getElementById('muteBtn'); const camBtn=document.getElementById('camBtn');
+muteBtn.onclick=()=>{ if(!localStream) return; const at=localStream.getAudioTracks()[0]; if(!at) return; at.enabled=!at.enabled; muteBtn.textContent='Mic: '+(at.enabled?'On':'Off'); };
+camBtn.onclick=()=>{ if(!localStream) return; const vt=localStream.getVideoTracks()[0]; if(!vt) return; vt.enabled=!vt.enabled; camBtn.textContent='Cam: '+(vt.enabled?'On':'Off'); };
+
+// Reactions
+function spawnReaction(emoji){const host=document.getElementById('videoStage');const el=document.createElement('div');el.className='reaction-fx';el.textContent=emoji;const x=(host.clientWidth/2)+(Math.random()*160-80);const y=host.clientHeight-40;el.style.left=x+'px';el.style.top=y+'px';host.appendChild(el);setTimeout(()=>el.remove(),1400)}
+let lastReact=0;document.getElementById('reactionBar').addEventListener('click',e=>{const now=Date.now();if(now-lastReact<600)return;lastReact=now;const btn=e.target.closest('[data-r]');if(!btn||!hasPartner)return;const emoji=btn.getAttribute('data-r');spawnReaction(emoji);socket.emit('reaction',{emoji})});
+socket.on('reaction',({emoji})=>spawnReaction(emoji));
+
+// Block/Report
+document.getElementById('blockBtn').onclick=()=>{ if(!currentPartnerId)return alert('No partner to block.'); socket.emit('disconnectPartner') };
+document.getElementById('reportBtn').onclick=()=>{ if(!currentPartnerId)return alert('No partner to report.'); socket.emit('report',{partnerId:currentPartnerId, topic:(new URLSearchParams(location.search).get('topic')||'')}); socket.emit('disconnectPartner'); };
+
+document.getElementById('nextBtn').onclick=()=>{ if(hasPartner) socket.emit('next'); else socket.emit('setTopic', topic); };
+document.getElementById('disconnectBtn').onclick=()=>{ if(hasPartner) socket.emit('disconnectPartner'); location.href='/'; };
+</script>
+</body></html>

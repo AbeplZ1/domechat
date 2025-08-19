@@ -1,0 +1,17 @@
+{
+  "name": "domechat",
+  "version": "6.2.0",
+  "description": "DomeChat \u2014 Audio+Permission Fix: robust getUserMedia (Brave), audio capture & unmute UX, diagnostics",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
