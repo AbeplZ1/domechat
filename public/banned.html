@@ -1,0 +1,15 @@
+
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DomeChat — See you soon</title><link rel="stylesheet" href="styles.css"/>
+<style>.box{max-width:520px;margin:15vh auto;background:linear-gradient(180deg,#111318,#0e1014);
+border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:20px;text-align:center}.time{font-size:20px;margin-top:8px}
+.pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#1a2230;color:#e6f0ff;border:1px solid rgba(255,255,255,.2);margin:6px 4px;font-size:12px}</style>
+</head><body><div class="box"><h2>See you soon 👋</h2>
+<p>Multiple users reported nudity from your account. DomeChat takes safety seriously.</p>
+<div class="pill">Ban length: 7 days</div><div class="time">Time remaining: <span id="remain">calculating…</span></div>
+<p style="opacity:.85">Please come back when the timer ends.</p><div style="margin-top:14px"><a href="/">Return to Home</a></div></div>
+<script>const qs=new URLSearchParams(location.search);const until=new Date(qs.get('until')||Date.now()+604800000);
+function tick(){const ms=+until-Date.now();if(ms<=0){document.getElementById('remain').textContent='Expired — you can try again';return}
+const d=Math.floor(ms/86400000);const h=Math.floor((ms%86400000)/3600000);const m=Math.floor((ms%3600000)/60000);const s=Math.floor((ms%60000)/1000);
+document.getElementById('remain').textContent=`${d}d ${h}h ${m}m ${s}s`;}tick();setInterval(tick,1000);</script></body></html>

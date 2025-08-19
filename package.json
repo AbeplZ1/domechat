@@ -1,0 +1,17 @@
+{
+  "name": "domechat",
+  "version": "6.0.0",
+  "description": "DomeChat \u2014 ULTRA FINAL: black Pro theme, centered UI, reactions, Dome Phone, text+video fixes, Twilio ICE",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

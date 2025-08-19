@@ -1,0 +1,41 @@
+
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DomeChat</title><link rel="stylesheet" href="styles.css"/></head><body>
+<script>if(!localStorage.getItem('domechatTermsAccepted'))location.href='terms.html';</script>
+<div id="topbar">
+  <div class="brand"><div class="dot"></div><div class="logo">DOMECHAT</div></div>
+</div>
+<div class="page">
+  <main class="center">
+    <h1 class="logo" style="font-size:46px;letter-spacing:6px;margin:0">DOMECHAT</h1>
+    <div style="opacity:.9">Connect to video chat with people by topic.</div>
+
+    <div class="topic-wrap">
+      <span class="icon">#</span>
+      <input id="topic" class="topic-input" placeholder="Pick a topic (e.g., Music, TikTok, Sports)"/>
+      <button id="startBtn" class="topic-go">Connect</button>
+    </div>
+
+    <div id="trendingTitle" style="opacity:.85">Trending topics</div>
+    <div id="trendingWrap" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center"></div>
+
+    <div style="display:flex;gap:10px;justify-content:center">
+      <a class="chip" href="/domephone.html">Try Dome Phone</a>
+    </div>
+
+    <div class="follow-badge">follow domechat.live on TikTok</div>
+  </main>
+</div>
+<script>
+async function loadTrending(){try{const res=await fetch('/trending',{cache:'no-store'});let data=await res.json();
+if(!data.some(x=>x.topic.toLowerCase()==='tiktok'))data.unshift({topic:'TikTok',count:0});
+const wrap=document.getElementById('trendingWrap');wrap.innerHTML='';data.slice(0,12).forEach(item=>{
+const t=item.topic;const chip=document.createElement('button');chip.className='chip';
+chip.innerHTML=(t.toLowerCase()==='tiktok'?'<span class="hot">🔥</span> ':'')+t+(item.count>0?` (${item.count})`:'');
+chip.onclick=()=>location.href='/chat.html?topic='+encodeURIComponent(t);wrap.appendChild(chip);});}catch(e){}}
+loadTrending();setInterval(loadTrending,10000);
+const go=()=>{const t=document.getElementById('topic').value.trim();location.href='/chat.html'+(t?('?topic='+encodeURIComponent(t)):'')};
+document.getElementById('startBtn').onclick=go;
+document.getElementById('topic').addEventListener('keypress',e=>{if(e.key==='Enter')go();});
+</script></body></html>
