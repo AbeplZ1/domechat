@@ -1,0 +1,207 @@
+
+const path = require('path');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: true, methods: ['GET','POST'] } });
+
+// Basic security + static
+app.use((_,res,next)=>{
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('X-Frame-Options','DENY');
+  res.setHeader('Referrer-Policy','no-referrer');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' wss: https:; frame-ancestors 'none'");
+  next();
+});
+app.use(express.json());
+app.use(express.static('public'));
+app.get('/health', (_req,res)=> res.json({ok:true}));
+app.get('/', (_req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
+
+// Twilio ICE (optional)
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
+const TWILIO_API_KEY_SID = process.env.TWILIO_API_KEY_SID || '';
+const TWILIO_API_KEY_SECRET = process.env.TWILIO_API_KEY_SECRET || '';
+const ICE_TTL_MIN = parseInt(process.env.ICE_TTL_MIN || '10', 10);
+const DEFAULT_ICE = [{ urls: ['stun:stun.l.google.com:19302'] }];
+let cachedIce = null, cachedAt = 0;
+
+async function fetchTwilioIce(){
+  try{
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_API_KEY_SID || !TWILIO_API_KEY_SECRET) return null;
+    const auth = Buffer.from(`${TWILIO_API_KEY_SID}:${TWILIO_API_KEY_SECRET}`).toString('base64');
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Tokens.json`;
+    const res = await fetch(url, { method:'POST', headers: { Authorization: `Basic ${auth}` } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.ice_servers) ? data.ice_servers : null;
+  }catch{ return null; }
+}
+app.get('/ice', async (_req,res)=>{
+  const now = Date.now();
+  if (cachedIce && (now - cachedAt) < ICE_TTL_MIN*60000) return res.json(cachedIce);
+  const tw = await fetchTwilioIce();
+  if (tw && tw.length) cachedIce = tw;
+  else if (process.env.ICE_SERVERS_JSON) { try{ cachedIce = JSON.parse(process.env.ICE_SERVERS_JSON) } catch{ cachedIce = DEFAULT_ICE } }
+  else cachedIce = DEFAULT_ICE;
+  cachedAt = now; res.json(cachedIce);
+});
+
+// Trending topics (in-memory)
+const now = ()=> Date.now();
+const topicStats = new Map();
+function bump(topic, delta){
+  if (!topic) return;
+  const s = topicStats.get(topic) || {count:0, score:0, updated:now()};
+  s.count = Math.max(0, s.count + delta);
+  s.score += Math.max(0, delta);
+  s.updated = now();
+  topicStats.set(topic, s);
+}
+function decay(){
+  const tNow = now();
+  for (const [t,s] of topicStats){
+    const dt = (tNow - s.updated)/60000;
+    s.score *= Math.exp(-0.2*dt);
+    s.updated = tNow;
+    if (s.count<=0 && s.score<0.1) topicStats.delete(t);
+  }
+}
+app.get('/trending',(_req,res)=>{
+  decay();
+  const items = [...topicStats.entries()].map(([topic,s])=>({topic,count:s.count}))
+    .sort((a,b)=> (b.count-a.count) || a.topic.localeCompare(b.topic)).slice(0,12);
+  const fallback = [{topic:'TikTok',count:0},{topic:'Random',count:0},{topic:'Gaming',count:0},
+                    {topic:'Music',count:0},{topic:'Sports',count:0},{topic:'Memes',count:0},
+                    {topic:'Movies',count:0},{topic:'Tech',count:0}];
+  res.json(items.length?items:fallback);
+});
+
+// --- One-to-one chat logic ---
+const queues = {}; const q = t => (queues[t] ??= []);
+const HARD_BAN = new Map();
+const isActiveBan = id => (HARD_BAN.get(id)||0) > now();
+const reports = [];
+function uniqueReportersCount(target, windowMs){const since=now()-windowMs;return new Set(reports.filter(r=>r.reported===target && r.ts>=since).map(r=>r.reporter)).size}
+const REASON = 'Nudity/sexual content';
+
+io.on('connection',(socket)=>{
+  socket.topic=''; socket.sessionId='';
+
+  socket.on('session',(sid)=>{ socket.sessionId = String(sid||''); });
+  const cleanText = r => String(r).replace(/[\u0000-\u001F\u007F]/g,'').replace(/\s+/g,' ').trim().slice(0,64);
+
+  socket.on('setTopic',(t='')=>{
+    if(isActiveBan(socket.id)){const until=HARD_BAN.get(socket.id);socket.emit('banned',{untilISO:new Date(until).toISOString()});return}
+    const newT=cleanText(t);
+    if(socket.topic && socket.topic!==newT) bump(socket.topic,-1);
+    if(!socket.topic || socket.topic!==newT) bump(newT,+1);
+    socket.topic=newT;
+    if(socket.partner){const p=io.sockets.sockets.get(socket.partner); if(p){p.partner=null;p.emit('partnerDisconnected')} socket.partner=null}
+    const arr=q(socket.topic); const idx=arr.indexOf(socket.id); if(idx!==-1)arr.splice(idx,1); arr.push(socket.id);
+    if(!tryPair(socket.topic)) socket.emit('waiting','Searching for a partner…');
+  });
+
+  function tryPair(t){
+    queues[t]=q(t).filter(id=>io.sockets.sockets.get(id)&&!isActiveBan(id));
+    const arr=q(t); const shuffled=[...arr].sort(()=>Math.random()-0.5);
+    for(let i=0;i<shuffled.length;i++){
+      for(let j=i+1;j<shuffled.length;j++){
+        const a=shuffled[i], b=shuffled[j]; if(a===b)continue;
+        const sa=io.sockets.sockets.get(a), sb=io.sockets.sockets.get(b);
+        if(!sa||!sb||!sa.connected||!sb.connected)continue;
+        if(sa.partner||sb.partner)continue;
+        if(sa.sessionId && sb.sessionId && sa.sessionId===sb.sessionId) continue;
+        const ia=arr.indexOf(a); if(ia>-1)arr.splice(ia,1);
+        const ib=arr.indexOf(b); if(ib>-1)arr.splice(ib,1);
+        sa.partner=sb.id; sb.partner=sa.id;
+        const aPolite=a>b, bPolite=!aPolite;
+        sa.emit('partnerFound'); sb.emit('partnerFound');
+        sa.emit('roles',{polite:aPolite,peerId:sb.id});
+        sb.emit('roles',{polite:bPolite,peerId:sa.id});
+        return true;
+      }
+    }
+    return false;
+  }
+
+  socket.on('next',()=>{
+    const t=socket.topic||'';
+    if(socket.partner){const p=io.sockets.sockets.get(socket.partner); if(p){p.partner=null;p.emit('partnerDisconnected')} socket.partner=null}
+    queues[t]=q(t).filter(id=>io.sockets.sockets.get(id)&&!isActiveBan(id));
+    const arr=q(t); const idx=arr.indexOf(socket.id); if(idx!==-1)arr.splice(idx,1); arr.push(socket.id);
+    if(!tryPair(t)) socket.emit('waiting','Searching for a partner…');
+  });
+
+  socket.on('signal',d=>{ if(socket.partner) io.to(socket.partner).emit('signal',d); });
+  socket.on('typing',({from}={})=>{ if(socket.partner) io.to(socket.partner).emit('partnerTyping',{from:socket.id}); });
+  socket.on('message', ({text}={}) => {
+    if (!socket.partner) return;
+    if (typeof text !== 'string') return;
+    const trimmed = String(text).trim().slice(0, 2000);
+    if (!trimmed) return;
+    io.to(socket.partner).emit('message', { text: trimmed, from: socket.id });
+  });
+
+  socket.on('report',({partnerId,topic}={})=>{
+    if(!partnerId) return;
+    reports.push({reporter:socket.id, reported:partnerId, topic:String(topic||''), reason:REASON, ts:now()});
+    const unique24=uniqueReportersCount(partnerId,24*60*60*1000);
+    if(unique24>=8){const until=now()+7*24*60*60*1000;HARD_BAN.set(partnerId,until);const peer=io.sockets.sockets.get(partnerId);if(peer){peer.emit('banned',{untilISO:new Date(until).toISOString()});peer.disconnect(true)}}
+  });
+
+  socket.on('disconnectPartner',()=>{
+    if(socket.partner){io.to(socket.partner).emit('forceDisconnect'); const p=io.sockets.sockets.get(socket.partner); if(p)p.partner=null; socket.partner=null}
+  });
+
+  socket.on('disconnect',()=>{
+    if(socket.partner){const p=io.sockets.sockets.get(socket.partner); if(p){p.partner=null;p.emit('partnerDisconnected')}}
+    socket.partner=null;
+    if(socket.topic) bump(socket.topic,-1);
+  });
+});
+
+// --- Dome Phone (rooms) ---
+const rooms = new Map();
+function getRoom(code){ let r = rooms.get(code); if(!r){ r = { members: new Map() }; rooms.set(code, r);} return r; }
+
+io.of('/').on('connection', (socket)=>{
+  socket.on('phone:create', ({code,name}={})=>{
+    const r = getRoom(code);
+    r.members.set(socket.id, { name: String(name||'Guest').slice(0,16) });
+    socket.join('phone:'+code);
+    // send list to creator (empty or existing if recreated)
+    socket.emit('phone:peers', { peers: [...r.members.entries()].map(([id,m])=>({id,name:m.name})) });
+    io.to('phone:'+code).emit('phone:roomInfo', { code, count: r.members.size });
+  });
+  socket.on('phone:join', ({code,name}={})=>{
+    const r = getRoom(code);
+    socket.join('phone:'+code);
+    r.members.set(socket.id, { name: String(name||'Guest').slice(0,16) });
+    // send existing peers to the joiner
+    socket.emit('phone:peers', { peers: [...r.members.entries()].filter(([id])=>id!==socket.id).map(([id,m])=>({id,name:m.name})) });
+    io.to('phone:'+code).emit('phone:roomInfo', { code, count: r.members.size });
+    socket.to('phone:'+code).emit('phone:user-join', { id: socket.id, name: r.members.get(socket.id).name });
+  });
+  socket.on('phone:signal', ({to,type,description,candidate,room}={})=>{
+    io.to(to).emit('phone:signal', { from: socket.id, type, description, candidate });
+  });
+  socket.on('disconnect', ()=>{
+    for (const [code,r] of rooms){
+      if (r.members.delete(socket.id)){
+        io.to('phone:'+code).emit('phone:user-leave', { id: socket.id });
+        io.to('phone:'+code).emit('phone:roomInfo', { code, count: r.members.size });
+        if (r.members.size===0) rooms.delete(code);
+      }
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`✅ DomeChat listening on port ${PORT}`);
+});

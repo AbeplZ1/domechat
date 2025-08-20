@@ -1,0 +1,17 @@
+{
+  "name": "domechat",
+  "version": "8.0.0",
+  "description": "DomeChat \u2014 full Railway-ready build (1:1 chat + Dome Phone + fixes).",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
