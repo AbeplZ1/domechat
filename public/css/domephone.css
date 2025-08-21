@@ -1,0 +1,52 @@
+
+.dp-container{
+  --card: linear-gradient(180deg,#141821,#0f141c);
+  --line: rgba(255,255,255,.12);
+  width:100%;max-width:1150px;margin:18px auto;padding:0 14px;
+  display:grid;grid-template-columns: 1.1fr 1.4fr;gap:16px;
+}
+@media (max-width: 980px){ .dp-container{grid-template-columns:1fr} }
+
+.dp-card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  box-shadow:0 14px 28px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
+  overflow:hidden; display:flex; flex-direction:column; min-height:420px;
+}
+.dp-card-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));
+}
+.dp-card-title{font-weight:800;letter-spacing:.3px}
+.dp-badge{
+  background:rgba(255,255,255,.06);
+  border:1px solid var(--line);
+  padding:6px 10px; border-radius:10px; font-size:12px; color:#e7ecf5;
+}
+.dp-form{padding:14px;display:flex;flex-direction:column;gap:12px}
+.dp-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.dp-field{display:flex;flex-direction:column;gap:6px;min-width:180px;flex:1}
+.dp-field label{font-size:12px;color:#aab3c0}
+.dp-field input, .dp-field select{
+  background:#0c1117;color:#fff;border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;outline:none;
+}
+.dp-actions{display:flex;gap:8px}
+.dp-members{border-top:1px solid var(--line);margin-top:6px;padding:12px 14px}
+.dp-members-title{font-size:12px;color:#aab3c0;margin-bottom:6px}
+.dp-members-list{display:flex;flex-wrap:wrap;gap:8px}
+.dp-chip{
+  border:1px solid var(--line);background:rgba(255,255,255,.04);color:#e7ecf5;
+  padding:6px 10px;border-radius:999px;font-size:12px;
+}
+.dp-footer{border-top:1px solid var(--line);padding:12px 14px;display:flex;justify-content:flex-end}
+.dp-stage .dp-stage-panel{padding:14px}
+.dp-timer{font-size:12px;color:#aab3c0}
+/* Stage pieces */
+.canvas-wrap{display:flex;justify-content:center;margin:8px 0}
+.stack{display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.badge{border:1px solid var(--line);background:rgba(255,255,255,.04);padding:6px 10px;border-radius:10px;font-size:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}

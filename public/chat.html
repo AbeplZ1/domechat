@@ -1,0 +1,40 @@
+
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="256x256" href="/favicon-256.png">
+<title>DomeChat Chat</title><link rel="stylesheet" href="styles.css"/></head><body>
+<div id="topbar"><div class="brand"><div class="dot"></div><div class="logo">DOMECHAT</div></div></div>
+<div class="page">
+  <div class="controls" style="margin-bottom:10px">
+    <button id="enableBtn" class="square">Enable Camera & Mic</button>
+    <button id="nextBtn" class="square">Find Next</button>
+    <button id="muteBtn" class="ghost square" title="Toggle microphone">Mic: On</button>
+    <button id="camBtn" class="ghost square" title="Toggle camera">Cam: On</button>
+    <button id="reportBtn" class="ghost square" title="Report (nudity)">Report</button>
+    <button id="blockBtn" class="ghost square" title="Block">Block</button>
+    <button id="disconnectBtn" class="ghost square">Exit</button>
+  </div>
+  <div class="grid">
+    <div class="surface" id="videoStage">
+      <div id="searchOverlay" class="searching" style="display:none"><div style="text-align:center">
+        <div class="dotpulse" style="margin:0 auto 8px"></div><div>Searching for a partner…</div></div></div>
+      <div id="unmuteOverlay">Tap to unmute</div>
+      <div class="mic-meter" id="micMeter">mic: --</div>
+      <div class="remote-meter" id="remoteMeter">remote: --</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+    <div id="chatPanel" class="surface" style="padding:12px">
+      <div id="chatMessages" aria-live="polite"></div>
+      <div id="typingIndicator"></div>
+      <div id="controlsRow">
+        <input id="messageInput" placeholder="Type your message…" autocomplete="off"/>
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="follow-badge">follow domechat.live on TikTok</div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/revert-media.js"></script>
+</body></html>
