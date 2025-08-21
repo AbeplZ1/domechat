@@ -1,0 +1,17 @@
+{
+  "name": "domechat-core",
+  "version": "9.0.1",
+  "description": "DomeChat \u2014 CORE build (unchanged) + topic homepage patch.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
